@@ -40,6 +40,7 @@ DEFAULT_CROP_TYPE = BirdViewCropType.FRONT_AND_REAR_AREA
 
 
 class BirdViewMasks(IntEnum):
+    BUILDINGS = 9
     PEDESTRIANS = 8
     RED_LIGHTS = 7
     YELLOW_LIGHTS = 6
@@ -60,6 +61,7 @@ class BirdViewMasks(IntEnum):
 
 
 RGB_BY_MASK = {
+    BirdViewMasks.BUILDINGS: RGB.DIM_GRAY,
     BirdViewMasks.PEDESTRIANS: RGB.VIOLET,
     BirdViewMasks.RED_LIGHTS: RGB.RED,
     BirdViewMasks.YELLOW_LIGHTS: RGB.YELLOW,
@@ -170,6 +172,7 @@ class BirdViewProducer:
                 self.full_road_cache = static_cache[0]
                 self.full_lanes_cache = static_cache[1]
                 self.full_centerlines_cache = static_cache[2]
+                self.full_buildings_cache = static_cache[3]
                 LOGGER.info(f"Loaded static layers from cache file: {cache_path}")
             else:
                 LOGGER.warning(
@@ -178,18 +181,20 @@ class BirdViewProducer:
                 self.full_road_cache = self.masks_generator.road_mask()
                 self.full_lanes_cache = self.masks_generator.lanes_mask()
                 self.full_centerlines_cache = self.masks_generator.centerlines_mask()
+                self.full_buildings_cache = self.masks_generator.buildings_mask()
                 static_cache = np.stack(
                     [
                         self.full_road_cache,
                         self.full_lanes_cache,
                         self.full_centerlines_cache,
+                        self.full_buildings_cache,
                     ]
                 )
                 np.save(cache_path, static_cache, allow_pickle=False)
                 LOGGER.info(f"Saved static layers to cache file: {cache_path}")
 
     def parametrized_cache_path(self) -> str:
-        cache_dir = Path("birdview_v3_cache")
+        cache_dir = Path("birdview_v4_cache")
         cache_dir.mkdir(parents=True, exist_ok=True)
         opendrive_content_hash = cache.generate_opendrive_content_hash(self._map)
         cache_filename = (
@@ -231,6 +236,9 @@ class BirdViewProducer:
             cropping_rect.vslice, cropping_rect.hslice
         ]
         masks[BirdViewMasks.CENTERLINES.value] = self.full_centerlines_cache[
+            cropping_rect.vslice, cropping_rect.hslice
+        ]
+        masks[BirdViewMasks.BUILDINGS.value] = self.full_buildings_cache[
             cropping_rect.vslice, cropping_rect.hslice
         ]
 

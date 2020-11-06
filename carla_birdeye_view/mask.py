@@ -82,6 +82,13 @@ class MapMaskGenerator:
         self.client = client
         self.pixels_per_meter = pixels_per_meter
         self.rendering_window: Optional[RenderingWindow] = None
+        self.carla_fov_blockers  = [carla.CityObjectLabel.Buildings,
+                                    carla.CityObjectLabel.Walls,
+                                    carla.CityObjectLabel.Poles,
+                                    carla.CityObjectLabel.TrafficLight,
+                                    carla.CityObjectLabel.TrafficSigns,
+                                    carla.CityObjectLabel.GuardRail,
+                                    carla.CityObjectLabel.Vehicles]
 
         self._world = client.get_world()
         self._map = self._world.get_map()
@@ -91,6 +98,7 @@ class MapMaskGenerator:
         self._each_road_waypoints = self._generate_road_waypoints()
         self._mask_size: PixelDimensions = self.calculate_mask_size()
         self._render_lanes_on_junctions = render_lanes_on_junctions
+        self._static_bounding_boxes = self._world.get_level_bbs(carla.CityObjectLabel.Static)
 
     def _find_map_boundaries(self) -> MapBoundaries:
         """Find extreme locations on a map.
@@ -262,6 +270,28 @@ class MapMaskGenerator:
                 )
         return canvas
 
+    def buildings_mask(self) -> Mask:
+        bbs = []
+
+        for objects in self.carla_fov_blockers:
+            bbs.extend(self._world.get_level_bbs(objects))
+        canvas = self.make_empty_mask()
+        trans = carla.Transform()
+        for b in bbs:
+            bb = b.extent
+            corners = [
+                carla.Location(x=-bb.x + b.location.x, y=-bb.y + b.location.y),
+                carla.Location(x=bb.x + b.location.x, y=-bb.y + b.location.y),
+                carla.Location(x=bb.x + b.location.x, y=bb.y + b.location.y),
+                carla.Location(x=-bb.x + b.location.x, y=bb.y + b.location.y),
+            ]
+
+            height = bb.z + b.location.z
+
+            corners = [self.location_to_pixel(loc) for loc in corners]
+            cv.fillPoly(img=canvas, pts=np.int32([corners]), color=height)
+        return canvas
+
     def agent_vehicle_mask(self, agent: carla.Actor) -> Mask:
         canvas = self.make_empty_mask()
         bb = agent.bounding_box.extent
@@ -345,3 +375,6 @@ class MapMaskGenerator:
                 thickness=cv.FILLED,
             )
         return red_light_canvas, yellow_light_canvas, green_light_canvas
+
+
+
