@@ -286,7 +286,7 @@ class MapMaskGenerator:
                 carla.Location(x=-bb.x + b.location.x, y=bb.y + b.location.y),
             ]
 
-            height = bb.z + b.location.z
+            height = int(bb.z + b.location.z)
 
             corners = [self.location_to_pixel(loc) for loc in corners]
             cv.fillPoly(img=canvas, pts=np.int32([corners]), color=height)

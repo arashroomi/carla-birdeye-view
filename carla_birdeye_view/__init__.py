@@ -24,7 +24,6 @@ from carla_birdeye_view.mask import (
 
 LOGGER = logging.getLogger(__name__)
 
-
 BirdView = np.ndarray  # [np.uint8] with shape (height, width, channel)
 RgbCanvas = np.ndarray  # [np.uint8] with shape (height, width, 3)
 
@@ -127,17 +126,23 @@ class BirdViewProducer:
     """
 
     def __init__(
-        self,
-        client: carla.Client,
-        target_size: PixelDimensions,
-        render_lanes_on_junctions: bool,
-        pixels_per_meter: int = 4,
-        crop_type: BirdViewCropType = BirdViewCropType.FRONT_AND_REAR_AREA,
+            self,
+            client: carla.Client,
+            target_size: PixelDimensions,
+            render_lanes_on_junctions: bool,
+            pixels_per_meter: int = 4,
+            crop_type: BirdViewCropType = BirdViewCropType.FRONT_AND_REAR_AREA,
+            mask_selection=np.full(len(BirdViewMasks), True, dtype=bool)
     ) -> None:
         self.client = client
         self.target_size = target_size
         self.pixels_per_meter = pixels_per_meter
         self._crop_type = crop_type
+        self.mask_selection = mask_selection
+        self.number_of_rendered_masks = np.sum(mask_selection)
+        self.traffic_light_fetch = mask_selection[BirdViewMasks.RED_LIGHTS.value] \
+                                   | mask_selection[BirdViewMasks.YELLOW_LIGHTS.value] \
+                                   | mask_selection[BirdViewMasks.GREEN_LIGHTS.value]
 
         if crop_type is BirdViewCropType.FRONT_AND_REAR_AREA:
             rendering_square_size = round(
@@ -206,6 +211,7 @@ class BirdViewProducer:
         return str(cache_dir / cache_filename)
 
     def produce(self, agent_vehicle: carla.Actor) -> BirdView:
+
         all_actors = actors.query_all(world=self._world)
         segregated_actors = actors.segregate_by_type(actors=all_actors)
         agent_vehicle_loc = agent_vehicle.get_location()
@@ -229,18 +235,15 @@ class BirdViewProducer:
             ),
             dtype=np.uint8,
         )
-        masks[BirdViewMasks.ROAD.value] = self.full_road_cache[
-            cropping_rect.vslice, cropping_rect.hslice
-        ]
-        masks[BirdViewMasks.LANES.value] = self.full_lanes_cache[
-            cropping_rect.vslice, cropping_rect.hslice
-        ]
-        masks[BirdViewMasks.CENTERLINES.value] = self.full_centerlines_cache[
-            cropping_rect.vslice, cropping_rect.hslice
-        ]
-        masks[BirdViewMasks.BUILDINGS.value] = self.full_buildings_cache[
-            cropping_rect.vslice, cropping_rect.hslice
-        ]
+        if self.mask_selection[BirdViewMasks.ROAD.value]:
+            masks[BirdViewMasks.ROAD.value] = self.full_road_cache[cropping_rect.vslice, cropping_rect.hslice]
+        if self.mask_selection[BirdViewMasks.LANES.value]:
+            masks[BirdViewMasks.LANES.value] = self.full_lanes_cache[cropping_rect.vslice, cropping_rect.hslice]
+        if self.mask_selection[BirdViewMasks.CENTERLINES.value]:
+            masks[BirdViewMasks.CENTERLINES.value] = self.full_centerlines_cache[
+                cropping_rect.vslice, cropping_rect.hslice]
+        if self.mask_selection[BirdViewMasks.BUILDINGS.value]:
+            masks[BirdViewMasks.BUILDINGS.value] = self.full_buildings_cache[cropping_rect.vslice, cropping_rect.hslice]
 
         # Dynamic masks
         rendering_window = RenderingWindow(
@@ -269,39 +272,39 @@ class BirdViewProducer:
         return rgb_canvas
 
     def _render_actors_masks(
-        self,
-        agent_vehicle: carla.Actor,
-        segregated_actors: SegregatedActors,
-        masks: np.ndarray,
+            self,
+            agent_vehicle: carla.Actor,
+            segregated_actors: SegregatedActors,
+            masks: np.ndarray,
     ) -> np.ndarray:
         """Fill masks with ones and zeros (more precisely called as "bitmask").
         Although numpy dtype is still the same, additional semantic meaning is being added.
         """
-        lights_masks = self.masks_generator.traffic_lights_masks(
-            segregated_actors.traffic_lights
-        )
-        red_lights_mask, yellow_lights_mask, green_lights_mask = lights_masks
-        masks[BirdViewMasks.RED_LIGHTS.value] = red_lights_mask
-        masks[BirdViewMasks.YELLOW_LIGHTS.value] = yellow_lights_mask
-        masks[BirdViewMasks.GREEN_LIGHTS.value] = green_lights_mask
-        masks[BirdViewMasks.AGENT.value] = self.masks_generator.agent_vehicle_mask(
-            agent_vehicle
-        )
-        masks[BirdViewMasks.VEHICLES.value] = self.masks_generator.vehicles_mask(
-            segregated_actors.vehicles
-        )
-        masks[BirdViewMasks.PEDESTRIANS.value] = self.masks_generator.pedestrians_mask(
-            segregated_actors.pedestrians
-        )
+
+        if self.traffic_light_fetch:
+            lights_masks = self.masks_generator.traffic_lights_masks(segregated_actors.traffic_lights)
+            red_lights_mask, yellow_lights_mask, green_lights_mask = lights_masks
+            masks[BirdViewMasks.RED_LIGHTS.value] = red_lights_mask
+            masks[BirdViewMasks.YELLOW_LIGHTS.value] = yellow_lights_mask
+            masks[BirdViewMasks.GREEN_LIGHTS.value] = green_lights_mask
+        if self.mask_selection[BirdViewMasks.AGENT.value]:
+            masks[BirdViewMasks.AGENT.value] = self.masks_generator.agent_vehicle_mask(
+                agent_vehicle
+            )
+        if self.mask_selection[BirdViewMasks.VEHICLES.value]:
+            masks[BirdViewMasks.VEHICLES.value] = self.masks_generator.vehicles_mask(segregated_actors.vehicles)
+        if self.mask_selection[BirdViewMasks.PEDESTRIANS.value]:
+            masks[BirdViewMasks.PEDESTRIANS.value] = self.masks_generator.pedestrians_mask(
+                segregated_actors.pedestrians)
         return masks
 
     def apply_agent_following_transformation_to_masks(
-        self, agent_vehicle: carla.Actor, masks: np.ndarray
+            self, agent_vehicle: carla.Actor, masks: np.ndarray
     ) -> np.ndarray:
         """Returns image of shape: height, width, channels"""
         agent_transform = agent_vehicle.get_transform()
         angle = (
-            agent_transform.rotation.yaw + 90
+                agent_transform.rotation.yaw + 90
         )  # vehicle's front will point to the top
 
         # Rotating around the center
@@ -330,7 +333,7 @@ class BirdViewProducer:
         else:
             raise NotImplementedError
         assert (
-            vslice.start > 0 and hslice.start > 0
+                vslice.start > 0 and hslice.start > 0
         ), "Trying to access negative indexes is not allowed, check for calculation errors!"
         car_on_the_bottom = rotated[vslice, hslice]
         return car_on_the_bottom
